@@ -3,8 +3,9 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Dict, Set
 
+
 @dataclass
-class Config:
+class Histo2Config:
     log_dir: Path = Path('./logs/fit/')
 
     format_to_dtype: Dict[str, np.dtype] = field(default_factory=lambda: {
