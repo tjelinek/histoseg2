@@ -55,7 +55,3 @@ class Config:
         'adenocarcinoma', 'blood_and_vessels', 'connective_tissue', 'fat', 'inflammation_purulent',
         'muscle_cross_section', 'muscle_longitudinal_section', 'necrosis', 'nerve', 'normal_mucosa', 'empty'
     })
-
-    selected_classes_kather: Set[str] = field(default_factory=lambda: {
-        '01_TUMOR', '02_STROMA', '03_COMPLEX', '04_LYMPHO', '05_DEBRIS', '06_MUCOSA', '07_ADIPOSE', '08_EMPTY'
-    })
