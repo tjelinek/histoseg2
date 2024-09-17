@@ -11,7 +11,7 @@ import pyvips
 import PIL
 from PIL import Image, ImageDraw, ImageColor
 
-from cfg import  dtype_to_format
+from cfg import dtype_to_format
 from image.image_utils import Margins, crop_region_pyvips
 from util.data_manipulation_scripts import load_polygons_from_asap_annotation, generate_image_annotation_pairs
 from util.math_utils import is_point_inside_polygon, neighbourhood_to_vector, Interval2D, \
@@ -23,49 +23,29 @@ PIL.Image.MAX_IMAGE_PIXELS = 1e10
 
 class SegmentationAlgorithm:
 
-    def __init__(self, model, datagen_segmentation, width: int, height: int, num_classes: int,
-                 num_latent_variables: int, step: int, tile_size: int, neighborhood_size: int,
-                 neighborhood_distance: int, segmentation_batch_size: int, class_color_mapping: List[str],
-                 min_confidence_coef, neighborhood_strategy: str, margins: Margins):
+    def __init__(self, model, datagen_segmentation, width: int, height: int, step: int, margins: Margins, tile_size):
         """
         @param model: Keras model that for an image tile of size tile_size, computes probability map of classes
         @param datagen_segmentation: Datagen used for the model. It computes all image pre-processing functions
-        @param num_classes: Number of classes to predict
         @param step: Step of one prediction
         @param tile_size: Dimension of a tile that will be fed to the Keras model
-        @param segmentation_batch_size: Batch size for the Keras model
-        @param class_color_mapping: Mapping classes indexes to color, a list
         colors, should map from set {0, ..., num_classes} to a string of valid python colors. The last color is
         reserved for "unknown"
-        @param min_confidence_coef: Minimum confidence coefficient. Any predictions below min_confidence_coef will be
         treated as "unknown"
-        @param neighborhood_size: The size of neighborhood that will be taken into account for any neighborhood_strategy
-        @param neighborhood_strategy: one of 'majority' for majority vote, 'graphical_model', 'logistic_regression'
-        @param margins: The segmentation does not proceed in these regions, but the image data for the sliding window
-                        are loaded from within these regions. The format is (left, right, up, down).
-        @param neighborhood_distance distance between neighbors
+        :param tile_size:
+        :param margins:
         """
-        self.neighborhood_strategy = neighborhood_strategy
-
-        self.neighborhood_combinator: GridPointsCombinator
 
         self.model = model
         self.logistic_regression_model = None
         self.datagen_segmentation = datagen_segmentation
-        self.num_classes = num_classes
-        self.num_latent_variables = num_latent_variables
         self.step = step
         self.tile_size = tile_size
-        self.segmentation_batch_size = segmentation_batch_size
-        self.class_color_mapping = class_color_mapping
-        self.min_confidence_coef = min_confidence_coef
-        self.margins = margins
-        self.neighborhood_distance = neighborhood_distance
-
-        self.neighborhood_size = neighborhood_size
 
         self.width = width
         self.height = height
+
+        self.margins = margins
 
         self.pure_width = self.width - self.margins.left - self.margins.right
         self.pure_height = self.height - self.margins.up - self.margins.down
@@ -137,11 +117,7 @@ class SegmentationAlgorithm:
 
 class SmallSlideSegmentationAlgorithm(SegmentationAlgorithm):
 
-    def __init__(self, image: np.ndarray, model, datagen_segmentation, num_classes: int, num_latent_variables: int,
-                 step: int, tile_size: int,
-                 neighborhood_size: int, neighborhood_distance: int, segmentation_batch_size: int,
-                 class_color_mapping: List[str],
-                 min_confidence_coef, neighborhood_strategy: str, margins):
+    def __init__(self, image: np.ndarray, model, datagen_segmentation, step: int, margins):
         """
         Segmentation algorithm for small slides. Assumes that parameter 'image' fits into memory.
 
@@ -151,36 +127,13 @@ class SmallSlideSegmentationAlgorithm(SegmentationAlgorithm):
         width = dims[1]
         height = dims[0]
 
-        super().__init__(model, datagen_segmentation, width, height, num_classes, num_latent_variables, step,
-                         tile_size, neighborhood_size, neighborhood_distance, segmentation_batch_size,
-                         class_color_mapping,
-                         min_confidence_coef, neighborhood_strategy, margins)
+        super().__init__(model, datagen_segmentation, width, height, step, margins, tile_size)
 
         self.image = image
 
-        self.mapping: np.ndarray = np.zeros((self.grid_size_x, self.grid_size_y, self.num_latent_variables),
-                                            dtype='float')
-        self.mapping_votes: np.ndarray = np.zeros((self.grid_size_x, self.grid_size_y, self.num_latent_variables),
-                                                  dtype='uint8')
         self.mapping_max: np.ndarray = np.zeros((self.grid_size_x, self.grid_size_y), dtype='uint8')
 
         self.tile_size_div_two = self.tile_size // 2
-
-    def __update_mapping(self, tile_coords_stack, y_batch_pred) -> None:
-        """
-        Updates mapping.
-
-        @param tile_coords_stack: Stack of tile coordinates for the classifier.
-        @param y_batch_pred: Predictions for the batch of length self.batch_size.
-        """
-
-        for index in range(len(y_batch_pred)):
-            y_pred = y_batch_pred[index]
-            grid_x, grid_y = tile_coords_stack[index]
-            if self.num_latent_variables == self.num_classes:
-                class_index = np.argmax(y_pred)
-                self.mapping_votes[grid_x, grid_y, class_index] += 1
-            self.mapping[grid_x, grid_y] = y_pred
 
     def get_predictions(self, combine_neighbors=True, sampling=False) -> np.ndarray:
 
@@ -357,25 +310,18 @@ class SmallSlideSegmentationAlgorithm(SegmentationAlgorithm):
 
 class LargeSlideSegmentationAlgorithm(SegmentationAlgorithm):
 
-    def __init__(self, image_vips: pyvips.Image, model, datagen_segmentation, num_classes: int,
-                 num_latent_variables: int, step: int, tile_size: int, neighborhood_size: int,
-                 neighborhood_distance: int, segmentation_batch_size: int, class_color_mapping: List[str],
-                 min_confidence_coef, neighborhood_strategy: str, margins: Tuple[int, int, int, int], sampling: bool,
-                 combinator_model=None):
+    def __init__(self, image_vips: pyvips.Image, model, datagen_segmentation, step: int,
+                 margins: Tuple[int, int, int, int]):
         """
         @param image_vips: PyVipsImage
         """
         self.image_vips = image_vips
-        self.sampling = sampling
         self.processed = False
-        self.combinator_model = combinator_model
 
         width = self.image_vips.width
         height = self.image_vips.height
 
-        super().__init__(model, datagen_segmentation, width, height, num_classes, num_latent_variables, step,
-                         tile_size, neighborhood_size, neighborhood_distance, segmentation_batch_size,
-                         class_color_mapping, min_confidence_coef, neighborhood_strategy, margins)
+        super().__init__(model, datagen_segmentation, width, height, step, margins, tile_size)
 
         self.region_size = 10 * self.tile_size
 
@@ -411,24 +357,11 @@ class LargeSlideSegmentationAlgorithm(SegmentationAlgorithm):
 
             tile_idx += 1
 
-        print("\nPost-processing image...")
-
-        self.mapping = self.neighborhood_combinator(self.mapping, self.combinator_model, self.num_classes,
-                                                    self.neighborhood_size, self.default_vector,
-                                                    self.neighborhood_distance).synthesize_ensembles()
-
-        print("\nProcessing image took %s seconds" % (time.time() - start_time))
-
-        self.processed = True
-
     def __build_small_slide_segmenter(self, region_numpy: np.ndarray, margins: Margins) \
             -> SmallSlideSegmentationAlgorithm:
         return SmallSlideSegmentationAlgorithm(region_numpy, self.model, self.datagen_segmentation,
-                                               self.num_classes, self.num_latent_variables, self.step, self.tile_size,
-                                               self.neighborhood_size, self.neighborhood_distance,
-                                               self.segmentation_batch_size,
-                                               self.class_color_mapping, self.min_confidence_coef,
-                                               neighborhood_strategy=self.neighborhood_strategy, margins=margins)
+                                               self.step,
+                                               margins=margins)
 
     def __segmentation_generation(self, region_numpy, x, y, margins: Margins):
         """
@@ -615,17 +548,9 @@ class BasicImageSegmenter:
             neighborhood_size = self.tile_size // step // 2 + 1
 
         return SmallSlideSegmentationAlgorithm(img_numpy, self.model, self.datagen_segmentation,
-                                               self.num_classes, self.num_latent_variables, step,
-                                               self.tile_size, neighborhood_size, self.neighborhood_distance,
-                                               self.segmentation_batch_size, self.class_color_mapping,
-                                               self.min_confidence_coef, 'majority',
-                                               margins=Margins(0, 0, 0, 0))
+                                               step, margins=Margins(0, 0, 0, 0))
 
-    def build_large_image_segmentation_algorithm(self, image_path: Path, step: int,
-                                                 neighborhood_size: int = None,
-                                                 use_sampling: bool = False,
-                                                 combination_procedure='majority',
-                                                 combination_model=None) -> LargeSlideSegmentationAlgorithm:
+    def build_large_image_segmentation_algorithm(self, image_path: Path, step: int) -> LargeSlideSegmentationAlgorithm:
         """
 
         @param combination_model: Model to combine the values on neighbouring grid points.
@@ -636,99 +561,12 @@ class BasicImageSegmenter:
         @param step: Step with which the grid points are sampled.
         @return:
         """
-        if neighborhood_size is None:
-            neighborhood_size = self.tile_size // step // 2 + 1
         img_vips = pyvips.Image.tiffload(str(image_path), page=0)
 
-        return LargeSlideSegmentationAlgorithm(img_vips, self.model, self.datagen_segmentation, self.num_classes,
-                                               self.num_latent_variables, step,
-                                               self.tile_size, neighborhood_size, self.neighborhood_distance,
-                                               self.segmentation_batch_size, self.class_color_mapping,
-                                               self.min_confidence_coef, combination_procedure,
-                                               margins=Margins(0, 0, 0, 0), sampling=use_sampling,
-                                               combinator_model=combination_model)
+        return LargeSlideSegmentationAlgorithm(img_vips, self.model, self.datagen_segmentation, step,
+                                               margins=Margins(0, 0, 0, 0))
 
-    def __obtain_neighbourhood_data(self, dataset_path: Path, step: int, neighbourhood_size: int,
-                                    class_order: Dict[str, int]):
-        """
-
-         @param dataset_path: Path to the dataset that contains annotated images.
-         @param step: Step with which the grid points are sampled.
-         @param neighbourhood_size: Size of the neighbourhood (i.e. number of grid points) in each direction.
-         @return: Data from a neighbourhood as a ndarray
-         """
-
-        tiffs, annotations = generate_image_annotation_pairs(dataset_path)
-        num_files = len(tiffs)
-
-        Xs = []
-        ys = []
-
-        for file_idx in range(num_files):
-
-            polygons_dict = load_polygons_from_asap_annotation(annotations[file_idx])
-
-            segmentation_algorithm: LargeSlideSegmentationAlgorithm = self.build_large_image_segmentation_algorithm(
-                tiffs[file_idx], step, neighbourhood_size)
-
-            prediction_grid = segmentation_algorithm.get_predictions()
-
-            for grid_x, grid_y in product(range(prediction_grid.shape[0]), range(prediction_grid.shape[1])):
-                neighbourhood = np.zeros((2 * neighbourhood_size + 1, 2 * neighbourhood_size + 1,
-                                          self.num_latent_variables), 'float')
-
-                labels = list(polygons_dict.keys())
-                labels.sort()  # Convention is that the label order is its alphabetic order
-
-                for label in labels:
-                    polygons = polygons_dict[label]
-
-                    pixel_x = grid_x * step
-                    pixel_y = grid_y * step
-
-                    for polygon_points in polygons:
-
-                        if is_point_inside_polygon((pixel_x, pixel_y), polygon_points):
-                            for k, l in product(range(-neighbourhood_size, neighbourhood_size),
-                                                range(-neighbourhood_size, neighbourhood_size)):
-                                ik = grid_x + k
-                                jl = grid_y + l
-                                if 0 <= ik < prediction_grid.shape[0] and 0 <= jl < prediction_grid.shape[1]:
-                                    neighbourhood[k + neighbourhood_size,
-                                                  l + neighbourhood_size] = prediction_grid[ik, jl].copy()
-
-                                x = neighbourhood_to_vector(neighbourhood, dtype='float64')
-
-                                if label in class_order:
-                                    # Some labels in the annotations are not used in the classifier.
-                                    target = class_order[label]
-                                    Xs.append(x)
-                                    ys.append(target)
-
-                                # No need to investigate another polygon, as each point is in maximally one polygon.
-                                break
-
-        return np.asarray(Xs).astype('float'), np.asarray(ys).astype('uint8')
-
-    def train_logistic_regression(self, dataset_path: Path, step: int, neighbourhood_size: int,
-                                  class_order: Dict[str, int]) -> None:
-        """
-        Trains logistic regression classifier and saves it to the self.logistic_regression_clf params (needed to save
-        pipeline afterwards). The classifiers take the mot likely prediction of neighbourhood tiles, and outputs
-        a vector of probabilities of classes for the central point of each neighbourhood.
-
-        @param class_order: Mapping to class label to its index with which it appears in the softmax layer of the
-                            classifier. It is an attribute of ModelPipeline.params.
-        @param dataset_path: Path to annotated .tiff files (.tiffs and annotations separately)
-        @param step: Size of the step with which the classifier proceeds
-        @param neighbourhood_size: Size of the
-        """
-        Xs, ys = self.__obtain_neighbourhood_data(dataset_path, step, neighbourhood_size, class_order)
-        clf = LogisticRegression(random_state=0).fit(Xs, ys)
-        self.logistic_regression_clf = clf
-
-    def perform_segmentation(self, image_path: Path, destination: Path, step: int, use_sampling: bool = False,
-                             only_mask=False) -> None:
+    def perform_segmentation(self, image_path: Path, destination: Path, step: int, only_mask=False) -> None:
         """
         Performs segmentation of the given image with resolution 'step' and saves it to 'destination'.
         @param use_sampling: Use sampling to speed up segmentation speed by estimating region homogenity
@@ -740,8 +578,7 @@ class BasicImageSegmenter:
 
         image = pyvips.Image.new_from_file(str(image_path))
         if image.width > 10000 or image.height > 10000:
-            segmentation_algorithm = self.build_large_image_segmentation_algorithm(image_path, step,
-                                                                                   self.neighborhood_size)
+            segmentation_algorithm = self.build_large_image_segmentation_algorithm(image_path, step)
         else:
             segmentation_algorithm = self.build_small_image_segmentation_algorithm(image_path, step,
                                                                                    self.neighborhood_size)
