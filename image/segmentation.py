@@ -10,16 +10,13 @@ import numpy as np
 import pyvips
 import PIL
 from PIL import Image, ImageDraw, ImageColor
-from keras_preprocessing.image import ImageDataGenerator
-from sklearn.linear_model import LogisticRegression
 
-from cfg import format_to_dtype, dtype_to_format
+from cfg import  dtype_to_format
 from image.image_utils import Margins, crop_region_pyvips
 from util.data_manipulation_scripts import load_polygons_from_asap_annotation, generate_image_annotation_pairs
 from util.math_utils import is_point_inside_polygon, neighbourhood_to_vector, Interval2D, \
     sample_from_interval_2d
 from util.algorithms import ImageSegmentationIterator
-from ml.ensembles import GridPointsCombinator, GridPointsCombinatorNeuralNetworks
 
 PIL.Image.MAX_IMAGE_PIXELS = 1e10
 
@@ -51,13 +48,6 @@ class SegmentationAlgorithm:
         self.neighborhood_strategy = neighborhood_strategy
 
         self.neighborhood_combinator: GridPointsCombinator
-
-        if neighborhood_strategy == 'majority':
-            self.neighborhood_combinator = GridPointsCombinator
-        elif self.neighborhood_strategy == 'neural_networks':
-            self.neighborhood_combinator = GridPointsCombinatorNeuralNetworks
-        else:
-            raise ValueError("Illegal argument for 'neighborhood_strategy'")
 
         self.model = model
         self.logistic_regression_model = None

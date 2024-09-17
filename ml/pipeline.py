@@ -1,14 +1,10 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Union
-from tensorflow.keras.callbacks import TensorBoard
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow import keras
 
 from cfg import LOG_DIR, selected_classes_feit
 from ml.eval import eval_model
-from ml.util import rename_keras_layer, NeighborhoodImageDataGenerator
+from ml.util import NeighborhoodImageDataGenerator
 from image.segmentation import BasicImageSegmenter
 from util.data_manipulation_scripts import get_tiffs_in_directory
 
