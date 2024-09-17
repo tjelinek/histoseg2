@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Union
 
-from cfg import selected_classes_feit, Histo2Config
+from cfg import Histo2Config
 from ml.eval import eval_model
 from image.segmentation import BasicImageSegmenter
 from util.data_manipulation_scripts import get_tiffs_in_directory
@@ -31,9 +31,6 @@ class PipelineParams:
         self.class_names: Union[List[str], None] = None
         self.class_order = None
 
-        self.neighborhood_tiles = 0
-
-        self.epochs = 10
         self.segmenter = None
 
 
@@ -155,33 +152,6 @@ class ModelPipeline:
         pass
 
 
-class KatherDataPipeline(ModelPipeline, ABC):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.params.class_to_color_mapping = [
-            'Purple',  # Tumor
-            'White',  # Tissue
-            'Orange',  # Complex
-            'Yellow',  # Lympho
-            'Blue',  # Debris
-            'Green',  # Mucosa
-            'Pink',  # Adipose
-            'Black',  # Empty
-            'Aqua'  # For unknown class
-        ]
-
-        self.params.number_of_classes = 8
-
-    @staticmethod
-    def load_pipeline(pipeline_name, with_neighborhood_model=False):
-        pipeline = super(KatherDataPipeline, KatherDataPipeline).load_pipeline(pipeline_name)
-        pipeline.__class__ = KatherDataPipeline
-        pipeline._update_static_information()
-
-        return pipeline
-
-
 class FeitDataPipeline(ModelPipeline, ABC):
     class_to_color_mapping = [
         'Purple',  # adenocarcinoma
@@ -202,23 +172,10 @@ class FeitDataPipeline(ModelPipeline, ABC):
         super().__init__(*args, **kwargs)
 
         self.params.class_to_color_mapping = FeitDataPipeline.class_to_color_mapping
-        self._update_static_information()
-        self.params.tile_size = 256
 
     @staticmethod
     def load_pipeline(pipeline_name, with_neighborhood_model=False):
         pipeline = super(FeitDataPipeline, FeitDataPipeline).load_pipeline(pipeline_name)
         pipeline.__class__ = FeitDataPipeline
-        pipeline._update_static_information()
 
         return pipeline
-
-    def _update_static_information(self):
-        self.params.class_names = sorted(list(selected_classes_feit))
-        self.params.class_names.sort()
-        self.params.class_order = dict()
-        self.params.class_to_color_mapping = FeitDataPipeline.class_to_color_mapping
-
-        for name_idx in range(len(self.params.class_names)):
-            self.params.class_order[self.params.class_names[name_idx]] = name_idx
-        self.params.number_of_classes = len(self.params.class_names)
